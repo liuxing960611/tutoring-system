@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>辅导班课时统计系统</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container {
+            max-width: 800px;
+            margin-top: 30px;
+        }
+        .record-list {
+            margin-top: 30px;
+        }
+        .delete-btn {
+            color: red;
+            cursor: pointer;
+        }
+        .summary-section {
+            margin-top: 20px;
+        }
+        .share-link {
+            word-break: break-all;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+    <!-- 添加 Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h2 class="text-center mb-4">辅导班课时统计系统</h2>
+        
+        <!-- 筛选功能 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                功能区
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <label class="form-label">按学生筛选</label>
+                        <select class="form-select" id="studentFilter">
+                            <option value="">全部学生</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">导出数据</label>
+                        <button class="btn btn-success" onclick="exportToExcel()">导出到Excel</button>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">分享记录</label>
+                        <button class="btn btn-info" onclick="shareRecords()">生成分享链接</button>
+                    </div>
+                </div>
+                <div id="shareLink" class="share-link" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- 添加学生信息表单 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                添加课程记录
+            </div>
+            <div class="card-body">
+                <form id="lessonForm">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">学生姓名</label>
+                            <input type="text" class="form-control" id="studentName" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">上课日期</label>
+                            <input type="date" class="form-control" id="lessonDate" required>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">课时费（元/小时）</label>
+                            <input type="number" class="form-control" id="hourlyRate" required>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">开始时间</label>
+                            <input type="time" class="form-control" id="startTime" required onchange="calculateDuration()">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">结束时间</label>
+                            <input type="time" class="form-control" id="endTime" required onchange="calculateDuration()">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label class="form-label">课程时长</label>
+                            <input type="text" class="form-control" id="duration" readonly>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">添加记录</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 记录显示区域 -->
+        <div class="card record-list">
+            <div class="card-header">
+                课程记录
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>学生姓名</th>
+                            <th>上课日期</th>
+                            <th>上课时间</th>
+                            <th>课时长度</th>
+                            <th>课时费</th>
+                            <th>费用小计</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsList">
+                    </tbody>
+                </table>
+                
+                <!-- 统计信息 -->
+                <div class="summary-section">
+                    <h5>统计信息</h5>
+                    <p>总课时：<span id="totalHours">0</span> 小时</p>
+                    <p>总费用：<span id="totalFees">0</span> 元</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化 Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyAFO8GBkcZIiQFoBDYcewlgCOANdddCWDc",
+            authDomain: "ceshi-ee7a2.firebaseapp.com",
+            databaseURL: "https://ceshi-ee7a2-default-rtdb.firebaseio.com",
+            projectId: "ceshi-ee7a2",
+            storageBucket: "ceshi-ee7a2.firebasestorage.app",
+            messagingSenderId: "22772411174",
+            appId: "1:22772411174:web:27d90fe237ca80e5696fe7",
+            measurementId: "G-YPRVMTSBP2"
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        let records = [];
+
+        // 从数据库加载数据
+        function loadRecords() {
+            database.ref('records').on('value', (snapshot) => {
+                const data = snapshot.val();
+                // 确保数据是数组格式
+                records = data ? Object.values(data) : [];
+                updateTable();
+                updateStudentFilter();
+            });
+        }
+
+        // 保存数据到数据库
+        function saveRecords() {
+            // 将数组转换为对象格式存储
+            const recordsObj = {};
+            records.forEach((record, index) => {
+                recordsObj[index] = record;
+            });
+            database.ref('records').set(recordsObj);
+        }
+
+        // 更新学生筛选下拉框
+        function updateStudentFilter() {
+            const studentFilter = document.getElementById('studentFilter');
+            const students = [...new Set(records.map(record => record.studentName))];
+            studentFilter.innerHTML = '<option value="">全部学生</option>';
+            students.forEach(student => {
+                studentFilter.innerHTML += `<option value="${student}">${student}</option>`;
+            });
+        }
+
+        // 更新表格显示
+        function updateTable(filterStudent = '') {
+            const tbody = document.getElementById('recordsList');
+            tbody.innerHTML = '';
+            
+            let filteredRecords = filterStudent 
+                ? records.filter(r => r.studentName === filterStudent)
+                : records;
+
+            let totalHours = 0;
+            let totalFees = 0;
+
+            filteredRecords.forEach((record, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${record.studentName}</td>
+                    <td>${record.lessonDate}</td>
+                    <td>${record.startTime} - ${record.endTime}</td>
+                    <td>${record.duration}小时</td>
+                    <td>${record.hourlyRate}元/小时</td>
+                    <td>${record.totalFee}元</td>
+                    <td><span class="delete-btn" onclick="deleteRecord(${index})">删除</span></td>
+                `;
+                tbody.appendChild(row);
+
+                totalHours += parseFloat(record.duration);
+                totalFees += parseFloat(record.totalFee);
+            });
+
+            // 更新统计信息
+            document.getElementById('totalHours').textContent = totalHours.toFixed(1);
+            document.getElementById('totalFees').textContent = totalFees.toFixed(2);
+        }
+
+        // 删除记录
+        function deleteRecord(index) {
+            if (confirm('确定要删除这条记录吗？')) {
+                records = records.filter((_, i) => i !== index);
+                saveRecords();
+                updateTable(document.getElementById('studentFilter').value);
+                updateStudentFilter();
+            }
+        }
+
+        // 导出到Excel
+        function exportToExcel() {
+            let csv = '学生姓名,上课日期,上课时间,课时长度,课时费,费用小计\n';
+            records.forEach(record => {
+                csv += `${record.studentName},${record.lessonDate},${record.startTime}-${record.endTime},${record.duration},${record.hourlyRate},${record.totalFee}\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = '课程记录.csv';
+            link.click();
+        }
+
+        // 添加计算时长的函数
+        function calculateDuration() {
+            const startTime = document.getElementById('startTime').value;
+            const endTime = document.getElementById('endTime').value;
+            
+            if (startTime && endTime) {
+                const start = new Date(`2000/01/01 ${startTime}`);
+                const end = new Date(`2000/01/01 ${endTime}`);
+                
+                // 如果结束时间小于开始时间，说明跨天，需要加24小时
+                let diff = end - start;
+                if (diff < 0) {
+                    diff += 24 * 60 * 60 * 1000;
+                }
+                
+                // 转换为小时，保留一位小数
+                const hours = (diff / (1000 * 60 * 60)).toFixed(1);
+                document.getElementById('duration').value = hours;
+            }
+        }
+
+        // 修改表单提交处理
+        document.getElementById('lessonForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const startTime = document.getElementById('startTime').value;
+            const endTime = document.getElementById('endTime').value;
+            const duration = document.getElementById('duration').value;
+            const hourlyRate = document.getElementById('hourlyRate').value;
+            
+            const record = {
+                studentName: document.getElementById('studentName').value,
+                lessonDate: document.getElementById('lessonDate').value,
+                startTime: startTime,
+                endTime: endTime,
+                duration: duration,
+                hourlyRate: hourlyRate,
+                totalFee: (duration * hourlyRate).toFixed(2)
+            };
+            
+            records.push(record);
+            saveRecords();
+            updateTable(document.getElementById('studentFilter').value);
+            updateStudentFilter();
+            
+            this.reset();
+            document.getElementById('duration').value = ''; // 清空时长显示
+        });
+
+        // 筛选功能
+        document.getElementById('studentFilter').addEventListener('change', function(e) {
+            updateTable(e.target.value);
+        });
+
+        // 修改分享功能
+        function shareRecords() {
+            const studentFilter = document.getElementById('studentFilter');
+            const selectedStudent = studentFilter.value;
+            
+            if (!selectedStudent) {
+                alert('请先选择要分享的学生！');
+                return;
+            }
+
+            // 创建一个唯一的分享ID
+            const shareId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+            
+            // 获取选中学生的记录
+            const studentRecords = records.filter(r => r.studentName === selectedStudent);
+            
+            // 将分享数据保存到数据库
+            database.ref(`shares/${shareId}`).set({
+                student: selectedStudent,
+                createdAt: Date.now()
+            });
+
+            // 生成分享链接
+            const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
+            
+            // 显示分享链接
+            const shareLinkDiv = document.getElementById('shareLink');
+            shareLinkDiv.style.display = 'block';
+            shareLinkDiv.innerHTML = `
+                <p>分享链接（点击复制）：</p>
+                <div class="input-group">
+                    <input type="text" class="form-control" value="${shareUrl}" readonly id="shareLinkInput">
+                    <button class="btn btn-outline-secondary" onclick="copyShareLink()">复制</button>
+                </div>
+            `;
+        }
+
+        // 复制分享链接
+        function copyShareLink() {
+            const shareLinkInput = document.getElementById('shareLinkInput');
+            shareLinkInput.select();
+            document.execCommand('copy');
+            alert('链接已复制到剪贴板！');
+        }
+
+        // 修改检查分享链接函数
+        function checkSharedData() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const shareId = urlParams.get('share');
+            
+            if (shareId) {
+                database.ref(`shares/${shareId}`).once('value').then((snapshot) => {
+                    const shareData = snapshot.val();
+                    
+                    if (shareData) {
+                        const studentName = shareData.student;
+                        
+                        database.ref('records').on('value', (snapshot) => {
+                            const data = snapshot.val();
+                            const allRecords = data ? Object.values(data) : [];
+                            records = allRecords.filter(r => r.studentName === studentName);
+                            
+                            // 更新界面
+                            document.querySelectorAll('.card.mb-4').forEach(card => {
+                                card.style.display = 'none';
+                            });
+                            document.querySelector('h2').textContent = `${studentName}的课程记录`;
+                            
+                            updateTable();
+                            
+                            if (!document.querySelector('.btn.btn-secondary')) {
+                                const container = document.querySelector('.container');
+                                const backButton = document.createElement('button');
+                                backButton.className = 'btn btn-secondary mt-3';
+                                backButton.textContent = '返回完整版';
+                                backButton.onclick = () => window.location.href = window.location.pathname;
+                                container.insertBefore(backButton, container.firstChild);
+                            }
+                        });
+                    } else {
+                        alert('分享链接已过期或无效！');
+                        window.location.href = window.location.pathname;
+                    }
+                });
+            }
+        }
+
+        // 页面加载时初始化数据
+        if (!window.location.search) {
+            loadRecords();
+        } else {
+            checkSharedData();
+        }
+    </script>
+</body>
+</html> 
