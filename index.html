@@ -27,6 +27,14 @@
             border-radius: 4px;
             margin-top: 10px;
         }
+        #shareCanvas {
+            display: none;
+        }
+        .share-image {
+            max-width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
     </style>
     <!-- 添加 Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -36,29 +44,34 @@
     <div class="container">
         <h2 class="text-center mb-4">辅导班课时统计系统</h2>
         
-        <!-- 筛选功能 -->
+        <!-- 修改功能区部分 -->
         <div class="card mb-4">
             <div class="card-header">
-                功能区
+                分享至家长
             </div>
             <div class="card-body">
                 <div class="row">
-                    <div class="col-md-4">
-                        <label class="form-label">按学生筛选</label>
+                    <div class="col-md-6">
+                        <label class="form-label">选择学生</label>
                         <select class="form-select" id="studentFilter">
-                            <option value="">全部学生</option>
+                            <option value="">请选择学生</option>
                         </select>
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label">导出数据</label>
-                        <button class="btn btn-success" onclick="exportToExcel()">导出到Excel</button>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">分享记录</label>
-                        <button class="btn btn-info" onclick="shareRecords()">生成分享链接</button>
+                    <div class="col-md-6">
+                        <label class="form-label">分享操作</label>
+                        <button class="btn btn-primary" onclick="generateShareImage()">生成分享图片</button>
                     </div>
                 </div>
-                <div id="shareLink" class="share-link" style="display: none;"></div>
+                <div id="shareLink" class="share-link mt-3" style="display: none;">
+                    <div class="alert alert-info">
+                        <h6 class="mb-2">分享说明：</h6>
+                        <p class="mb-2">1. 长按图片保存</p>
+                        <p class="mb-0">2. 将图片分享给家长</p>
+                    </div>
+                    <div class="text-center mt-3">
+                        <img id="shareImage" class="share-image">
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -128,14 +141,22 @@
                     </tbody>
                 </table>
                 
-                <!-- 统计信息 -->
+                <!-- 统计信息和导出按钮 -->
                 <div class="summary-section">
-                    <h5>统计信息</h5>
-                    <p>总课时：<span id="totalHours">0</span> 小时</p>
-                    <p>总费用：<span id="totalFees">0</span> 元</p>
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h5>统计信息</h5>
+                            <p>总课时：<span id="totalHours">0</span> 小时</p>
+                            <p class="mb-0">总费用：<span id="totalFees">0</span> 元</p>
+                        </div>
+                        <button class="btn btn-success" onclick="exportToExcel()">导出课程记录</button>
+                    </div>
                 </div>
             </div>
         </div>
+
+        <!-- 添加隐藏的画布 -->
+        <canvas id="shareCanvas" width="800" height="600"></canvas>
     </div>
 
     <script>
@@ -298,8 +319,20 @@
             updateTable(e.target.value);
         });
 
-        // 修改分享功能
-        function shareRecords() {
+        // 获取随机鼓励语
+        function getRandomEncouragement() {
+            const encouragements = [
+                "坚持就是胜利，继续保持这样的学习热情！",
+                "学习态度认真，进步明显，非常棒！",
+                "付出终有回报，你的努力我们都看在眼里！",
+                "学习是一个循序渐进的过程，保持这个节奏很好！",
+                "专注和坚持的态度值得表扬，继续加油！"
+            ];
+            return encouragements[Math.floor(Math.random() * encouragements.length)];
+        }
+
+        // 生成分享图片
+        function generateShareImage() {
             const studentFilter = document.getElementById('studentFilter');
             const selectedStudent = studentFilter.value;
             
@@ -308,88 +341,74 @@
                 return;
             }
 
-            // 创建一个唯一的分享ID
-            const shareId = Date.now().toString(36) + Math.random().toString(36).substr(2);
-            
-            // 获取选中学生的记录
             const studentRecords = records.filter(r => r.studentName === selectedStudent);
+            if (studentRecords.length === 0) {
+                alert('没有找到该学生的记录！');
+                return;
+            }
+
+            // 获取最新的课程记录
+            const latestRecord = studentRecords[studentRecords.length - 1];
             
-            // 将分享数据保存到数据库
-            database.ref(`shares/${shareId}`).set({
-                student: selectedStudent,
-                createdAt: Date.now()
+            // 计算总课时和总费用
+            const totalHours = studentRecords.reduce((sum, record) => sum + parseFloat(record.duration), 0).toFixed(1);
+            const totalFees = studentRecords.reduce((sum, record) => sum + parseFloat(record.totalFee), 0).toFixed(2);
+
+            // 获取画布和上下文
+            const canvas = document.getElementById('shareCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // 设置背景
+            ctx.fillStyle = '#f8f9fa';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 设置文字样式
+            ctx.fillStyle = '#333';
+            ctx.textAlign = 'center';
+
+            // 绘制标题
+            ctx.font = 'bold 36px Arial';
+            ctx.fillText('课程学习反馈', canvas.width/2, 80);
+
+            // 绘制学生信息
+            ctx.font = '24px Arial';
+            ctx.fillText(`${selectedStudent} 同学`, canvas.width/2, 140);
+
+            // 绘制最新课程信息
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`最近上课时间：${latestRecord.lessonDate}`, 100, 200);
+            ctx.fillText(`上课时段：${latestRecord.startTime} - ${latestRecord.endTime}`, 100, 240);
+            ctx.fillText(`本次课程时长：${latestRecord.duration} 小时`, 100, 280);
+
+            // 绘制统计信息
+            ctx.fillText(`累计上课时长：${totalHours} 小时`, 100, 340);
+            ctx.fillText(`累计课程费用：${totalFees} 元`, 100, 380);
+
+            // 绘制鼓励语
+            ctx.font = 'italic 22px Arial';
+            ctx.fillStyle = '#28a745';
+            const encouragement = getRandomEncouragement();
+            const words = encouragement.split('，');
+            words.forEach((word, index) => {
+                ctx.fillText(word, 100, 460 + index * 40);
             });
 
-            // 生成分享链接
-            const shareUrl = `${window.location.origin}${window.location.pathname}?share=${shareId}`;
-            
-            // 显示分享链接
+            // 绘制底部信息
+            ctx.font = '16px Arial';
+            ctx.fillStyle = '#666';
+            ctx.fillText('感谢您的信任与支持！', 100, 560);
+
+            // 显示生成的图片
             const shareLinkDiv = document.getElementById('shareLink');
+            const shareImage = document.getElementById('shareImage');
+            shareImage.src = canvas.toDataURL('image/png');
             shareLinkDiv.style.display = 'block';
-            shareLinkDiv.innerHTML = `
-                <p>分享链接（点击复制）：</p>
-                <div class="input-group">
-                    <input type="text" class="form-control" value="${shareUrl}" readonly id="shareLinkInput">
-                    <button class="btn btn-outline-secondary" onclick="copyShareLink()">复制</button>
-                </div>
-            `;
-        }
-
-        // 复制分享链接
-        function copyShareLink() {
-            const shareLinkInput = document.getElementById('shareLinkInput');
-            shareLinkInput.select();
-            document.execCommand('copy');
-            alert('链接已复制到剪贴板！');
-        }
-
-        // 修改检查分享链接函数
-        function checkSharedData() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const shareId = urlParams.get('share');
-            
-            if (shareId) {
-                database.ref(`shares/${shareId}`).once('value').then((snapshot) => {
-                    const shareData = snapshot.val();
-                    
-                    if (shareData) {
-                        const studentName = shareData.student;
-                        
-                        database.ref('records').on('value', (snapshot) => {
-                            const data = snapshot.val();
-                            const allRecords = data ? Object.values(data) : [];
-                            records = allRecords.filter(r => r.studentName === studentName);
-                            
-                            // 更新界面
-                            document.querySelectorAll('.card.mb-4').forEach(card => {
-                                card.style.display = 'none';
-                            });
-                            document.querySelector('h2').textContent = `${studentName}的课程记录`;
-                            
-                            updateTable();
-                            
-                            if (!document.querySelector('.btn.btn-secondary')) {
-                                const container = document.querySelector('.container');
-                                const backButton = document.createElement('button');
-                                backButton.className = 'btn btn-secondary mt-3';
-                                backButton.textContent = '返回完整版';
-                                backButton.onclick = () => window.location.href = window.location.pathname;
-                                container.insertBefore(backButton, container.firstChild);
-                            }
-                        });
-                    } else {
-                        alert('分享链接已过期或无效！');
-                        window.location.href = window.location.pathname;
-                    }
-                });
-            }
         }
 
         // 页面加载时初始化数据
         if (!window.location.search) {
             loadRecords();
-        } else {
-            checkSharedData();
         }
     </script>
 </body>
